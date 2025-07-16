@@ -671,6 +671,104 @@ export class Todo {
                 if (conn) conn.release();
             }
         })
+
+        this.app.get('/api/galactic-connections', requireAuth, async (req, res) => {
+            const userId = req.user.id;
+            let conn;
+            try {
+                conn = await pool.getConnection();
+
+                // Pobierz wszystkie połączenia użytkownika
+                const [rows] = await conn.execute(
+                    `SELECT categoryId, projectIdFrom, projectIdTo
+                    FROM galactic_connections
+                    WHERE userId = ?
+                    ORDER BY categoryId`,
+                    [userId]
+                );
+
+                // Pobierz mapy id → publicId dla kategorii i projektów użytkownika
+                const [categories] = await conn.execute(
+                    `SELECT id, publicId FROM categories WHERE userId = ?`,
+                    [userId]
+                );
+                const [projects] = await conn.execute(
+                    `SELECT id, publicId FROM projects WHERE userId = ?`,
+                    [userId]
+                );
+
+                const categoryMap = Object.fromEntries(categories.map(c => [c.id, c.publicId]));
+                const projectMap = Object.fromEntries(projects.map(p => [p.id, p.publicId]));
+
+                // Zamień id na publicId w odpowiednich polach
+                const mapped = rows.map(row => ({
+                    categoryId: categoryMap[row.categoryId] ?? null,
+                    projectIdFrom: projectMap[row.projectIdFrom] ?? null,
+                    projectIdTo: projectMap[row.projectIdTo] ?? null,
+                })).filter(conn => conn.categoryId && conn.projectIdFrom && conn.projectIdTo); // odfiltruj niepełne
+
+                res.json({ success: true, data: mapped });
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ success: false, error: 'An error occurred while fetching galactic connections.' });
+            } finally {
+                if (conn) conn.release();
+            }
+        });
+
+        this.app.get('/api/habits', requireAuth, async (req, res) => {
+            let conn;
+            try {
+                conn = await pool.getConnection();
+
+                const [rows] = await conn.execute(
+                    `SELECT * FROM habits`
+                );
+
+                res.json({ success: true, data: rows });
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ success: false, error: 'An error occurred while fetching habits.' });
+            } finally {
+                if (conn) conn.release();
+            }
+        });
+
+        this.app.get('/api/habits-days', requireAuth, async (req, res) => {
+            let conn;
+            try {
+                conn = await pool.getConnection();
+
+                const [rows] = await conn.execute(
+                    `SELECT * FROM habit_days`
+                );
+
+                res.json({ success: true, data: rows });
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ success: false, error: 'An error occurred while fetching habit days.' });
+            } finally {
+                if (conn) conn.release();
+            }
+        });
+
+        this.app.get('/api/habits-logs', requireAuth, async (req, res) => {
+            let conn;
+            try {
+                conn = await pool.getConnection();
+
+                const [rows] = await conn.execute(
+                    `SELECT * FROM habit_logs`
+                );
+
+                res.json({ success: true, data: rows });
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ success: false, error: 'An error occurred while fetching habit logs.' });
+            } finally {
+                if (conn) conn.release();
+            }
+        });
     }
 
     deleters() {
@@ -744,6 +842,63 @@ export class Todo {
             } catch (err) {
                 console.error(err);
                 res.status(500).json({success: false, error: err.message});
+            } finally {
+                if (conn) conn.release();
+            }
+        });
+
+        this.app.delete('/api/habit-logs', requireAuth, async (req, res) => {
+            const { id, date } = req.query;
+            const userId = req.user.id;
+
+            if (!id || !date) {
+                return res.status(400).json({ success: false, error: 'Missing id or date.' });
+            }
+
+            let conn;
+            try {
+                conn = await pool.getConnection();
+
+                const [result] = await conn.execute(
+                    `DELETE FROM habit_logs 
+                    WHERE userId = ? AND habit_id = ? AND date = ?`,
+                    [userId, id, date]
+                );
+
+                res.json({ success: true, deleted: result.affectedRows });
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ success: false, error: err.message });
+            } finally {
+                if (conn) conn.release();
+            }
+        });
+
+        this.app.delete('/api/habit', requireAuth, async (req, res) => {
+            const { id } = req.query;
+            const userId = req.user.id;
+
+            if (!id) {
+                return res.status(400).json({ success: false, error: 'Missing id.' });
+            }
+
+            let conn;
+            try {
+                conn = await pool.getConnection();
+
+                await conn.beginTransaction();
+
+                await conn.execute(`DELETE FROM habit_logs WHERE userId = ? AND habit_id = ?`, [userId, id]);
+                await conn.execute(`DELETE FROM habit_days WHERE userId = ? AND habit_id = ?`, [userId, id]);
+                const [result] = await conn.execute(`DELETE FROM habits WHERE userId = ? AND id = ?`, [userId, id]);
+
+                await conn.commit();
+
+                res.json({ success: true, deleted: result.affectedRows });
+            } catch (err) {
+                if (conn) await conn.rollback();
+                console.error(err);
+                res.status(500).json({ success: false, error: err.message });
             } finally {
                 if (conn) conn.release();
             }
@@ -1038,6 +1193,106 @@ export class Todo {
                 if (conn) conn.release();
             }
         });
+
+        this.app.put('/api/change-galactic-connection', requireAuth, async (req, res) => {
+            const { categoryId, from, to, add } = req.query;
+            const userId = req.user.id;
+
+            if (!categoryId || !from || !to || (add !== 'true' && add !== 'false')) {
+                return res.status(400).json({ success: false, error: 'Missing or invalid parameters' });
+            }
+
+            let conn;
+            try {
+                conn = await pool.getConnection();
+
+                // Pobieramy ID z `projects` po publicId i userId
+                const [[fromProject]] = await conn.execute(
+                    'SELECT id FROM projects WHERE publicId = ? AND userId = ?',
+                    [from, userId]
+                );
+                const [[toProject]] = await conn.execute(
+                    'SELECT id FROM projects WHERE publicId = ? AND userId = ?',
+                    [to, userId]
+                );
+
+                if (!fromProject || !toProject) {
+                    return res.status(404).json({ success: false, error: 'Project not found for from/to' });
+                }
+
+                // Pobieramy ID kategorii po publicId
+                const [[categoryRow]] = await conn.execute(
+                    'SELECT id FROM categories WHERE publicId = ? AND userId = ?',
+                    [categoryId, userId]
+                );
+
+                if (!categoryRow) {
+                    return res.status(404).json({ success: false, error: 'Category not found' });
+                }
+
+                if (add === 'true') {
+                    const [result] = await conn.execute(
+                        `INSERT INTO galactic_connections (categoryId, projectIdFrom, projectIdTo, userId)
+                        VALUES (?, ?, ?, ?)`,
+                        [categoryRow.id, fromProject.id, toProject.id, userId]
+                    );
+                    return res.json({ success: true, added: result.affectedRows });
+                } else {
+                    const [result] = await conn.execute(
+                        `DELETE FROM galactic_connections
+                        WHERE categoryId = ? AND projectIdFrom = ? AND projectIdTo = ? AND userId = ?`,
+                        [categoryRow.id, fromProject.id, toProject.id, userId]
+                    );
+                    return res.json({ success: true, deleted: result.affectedRows });
+                }
+
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ success: false, error: err.message });
+            } finally {
+                if (conn) conn.release();
+            }
+        });
+
+        this.app.put('/api/change-project-coords', requireAuth, async (req, res) => {
+            const { id, x, y } = req.query;
+            const userId = req.user.id;
+
+            // Walidacja
+            if (!id || x === undefined || y === undefined) {
+                return res.status(400).json({success: false, error: 'Missing id, x or y parameter'});
+            }
+
+            let conn;
+            try {
+                conn = await pool.getConnection();
+
+                // 🔁 Zamiana publicId na id
+                const [projectRows] = await conn.execute(
+                    `SELECT id FROM projects WHERE publicId = ? AND userId = ?`,
+                    [id, userId]
+                );
+
+                if (projectRows.length === 0) {
+                    return res.status(404).json({success: false, error: 'Project not found'});
+                }
+
+                const internalId = projectRows[0].id;
+
+                // ✅ Aktualizacja po ID
+                const [result] = await conn.execute(
+                    `UPDATE projects SET x = ?, y = ? WHERE id = ? AND userId = ?`,
+                    [x, y, internalId, userId]
+                );
+
+                res.json({success: true, updated: result.affectedRows});
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({success: false, error: err.message});
+            } finally {
+                if (conn) conn.release();
+            }
+        });
     }
 
     posters() {
@@ -1155,6 +1410,103 @@ export class Todo {
                 if (conn) conn.release();
             }
         });
+
+        this.app.post('/api/habit', requireAuth, async (req, res) => {
+            const { name } = req.body;
+            const userId = req.user.id;
+            const importancy = 3; // stała wartość
+
+            if (!name) {
+                return res.status(400).json({ success: false, error: 'Missing habit name.' });
+            }
+
+            let conn;
+            try {
+                conn = await pool.getConnection();
+
+                await conn.execute(
+                    `INSERT INTO habits (name, importancy, userId) VALUES (?, ?, ?)`,
+                    [name, importancy, userId]
+                );
+
+                const [rows] = await conn.execute(
+                    `SELECT * FROM habits WHERE userId = ? ORDER BY id DESC LIMIT 1`,
+                    [userId]
+                );
+
+                res.json({ success: true, habit: rows[0] });
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ success: false, error: 'Failed to add habit.' });
+            } finally {
+                if (conn) conn.release();
+            }
+        });
+
+        this.app.post('/api/habit-days', requireAuth, async (req, res) => {
+            const { id, days } = req.body;
+            const userId = req.user.id;
+
+            if (!id || !Array.isArray(days)) {
+                return res.status(400).json({ success: false, error: 'Invalid input.' });
+            }
+
+            let conn;
+            try {
+                conn = await pool.getConnection();
+
+                const queries = days.map(day => {
+                    if (day.start_date && day.end_date) {
+                        return conn.execute(
+                            `INSERT INTO habit_days (habit_id, day_of_week, start_date, end_date) VALUES (?, ?, ?, ?)`,
+                            [id, day.day_of_week, day.start_date, day.end_date]
+                        );
+                    } else {
+                        return conn.execute(
+                            `INSERT INTO habit_days (habit_id, day_of_week) VALUES (?, ?)`,
+                            [id, day.day_of_week]
+                        );
+                    }
+                });
+
+                await Promise.all(queries);
+
+                res.json({ success: true });
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ success: false, error: 'Failed to add habit days.' });
+            } finally {
+                if (conn) conn.release();
+            }
+        });
+
+        this.app.post('/api/habit-logs', requireAuth, async (req, res) => {
+            const { id, date } = req.body;
+
+            if (!id || !date) {
+                return res.status(400).json({ success: false, error: 'Invalid input.' });
+            }
+
+            let conn;
+            try {
+                conn = await pool.getConnection();
+
+                await conn.execute(
+                    `INSERT INTO habit_logs (habit_id, date) VALUES (?, ?)`,
+                    [id, date]
+                );
+
+                res.json({ success: true });
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ success: false, error: 'Failed to add habit log.' });
+            } finally {
+                if (conn) conn.release();
+            }
+        });
+
+        
+
     }
 
 }
