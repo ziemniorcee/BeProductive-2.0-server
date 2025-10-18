@@ -1,9 +1,19 @@
-import {Server} from "./server.js";
+import 'dotenv/config';
+import { initDb }    from './db.js';
+import { Server }    from './server.js';
 
-class Main {
-    constructor() {
-        this.server = new Server()
-    }
+async function bootstrap() {
+    await initDb();
+    console.log('🔧 DB initialized');
+
+    // 2) Create your server and configure routes
+    const server = new Server();
+
+    server.configure();
+    server.listen();
 }
 
-const app = new Main();
+bootstrap().catch(err => {
+    console.error('❌ Failed to start application:', err);
+    process.exit(1);
+});

@@ -1,35 +1,36 @@
 import express from 'express';
 import cors from 'cors';
-import {pool} from './db.js';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import {requireAuth} from "./auth-middleware.js";
 import {Todo} from "./todo/todo.js";
 import {Settings} from "./settings.js";
+import {initDb, pool} from "./db.js";
 
 export class Server {
     constructor() {
         this.app = express();
-        this.todo = new Todo(this.app)
-        this.settings = new Settings(this.app)
-        this.init()
+
     }
 
-    init() {
-        const port = process.env.PORT || 8080;
-
-        this.app.use(cors({
-            origin: process.env.CLIENT_ORIGIN || '*'
-        }));
-
+    configure() {
+        this.app.use(cors({ origin: process.env.CLIENT_ORIGIN || '*' }));
         this.app.use(express.json());
 
-        this.app.listen(port, '0.0.0.0', () => {
-            console.log(`API server listening on http://localhost:${port}`);
-        });
-
+        // 2) Routes
+        this.todo = new Todo(this.app);
+        this.settings = new Settings(this.app);
         this.getters()
+
     }
+
+    listen() {
+        const port = process.env.PORT || 8080;
+        this.app.listen(port, '0.0.0.0', () => {
+            console.log(`✅ API server listening on http://localhost:${port}`);
+        });
+    }
+
 
     getters() {
         // Example: GET /api/time → returns current DB time

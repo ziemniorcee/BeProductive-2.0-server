@@ -1,23 +1,31 @@
-// loads .env first
-import dotenv from 'dotenv';
-dotenv.config();
-
+import 'dotenv/config';
 import { Connector } from '@google-cloud/cloud-sql-connector';
 import mysql from 'mysql2/promise';
 
-const connector = new Connector();
+export let pool;
 
-// bootstraps a secure tunnel + TLS for you
-const clientOpts = await connector.getOptions({
-    instanceConnectionName: process.env.CLOUD_SQL_CONNECTION_NAME,
-    ipType: process.env.PRIVATE_IP ? 'PRIVATE' : 'PUBLIC',
-});
+export async function initDb() {
+    console.log(process.env.CLOUD_SQL_CONNECTION_NAME)
+    const connector = new Connector();
+    const clientOpts = await connector.getOptions({
+        instanceConnectionName: process.env.CLOUD_SQL_CONNECTION_NAME.trim(),
+        ipType: 'PUBLIC', // albo logika na env PRIVATE_IP
+    });
 
-export const pool = mysql.createPool({
-    ...clientOpts,
-    user:     process.env.DB_USER,
-    password: process.env.DB_PASS,
-    database: process.env.DB_NAME,
-    waitForConnections: true,
-    connectionLimit: 10,
-});
+    pool = mysql.createPool({
+        ...clientOpts,
+        user:     process.env.DB_USER,
+        password: process.env.DB_PASS,
+        database: process.env.DB_NAME,
+        waitForConnections: true,
+        connectionLimit:    10,
+    });
+
+    console.log('🔧 DB pool initialized');
+}
+
+// zwracasz pool tam, gdzie go potrzebujesz
+export function getPool() {
+    if (!pool) throw new Error('Pool not initialized');
+    return pool;
+}

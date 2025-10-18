@@ -54,7 +54,7 @@ export class Settings {
                       LEFT JOIN categories C ON P.categoryId = C.id
                       LEFT JOIN icons I ON P.iconId = I.id
              WHERE P.userId = ${userId}
-             ORDER BY P.id `
+             ORDER BY C.publicId `
                 );
 
                 res.json({success: true, projects: projects});

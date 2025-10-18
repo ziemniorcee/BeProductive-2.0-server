@@ -70,6 +70,7 @@ export class Todo {
                         T.id               AS taskId,
                         T.publicId         AS taskPublicId,
                         T.name             AS name,
+                        T.note             AS note,
                         T.checkState       AS checkState,
                         T.goalPos          AS goalPos,
                         C.publicId         AS categoryPublicId,
@@ -98,6 +99,7 @@ export class Todo {
                         T.id               AS taskId,
                         T.publicId         AS taskPublicId,
                         T.name             AS name,
+                        T.note             AS note,
                         T.checkState       AS checkState,
                         T.goalPos          AS goalPos,
                         C.publicId         AS categoryPublicId,
@@ -123,6 +125,7 @@ export class Todo {
                         T.id               AS taskId,
                         T.publicId         AS taskPublicId,
                         T.name             AS name,
+                        T.note             AS note,
                         T.checkState       AS checkState,
                         T.goalPos          AS goalPos,
                         C.publicId         AS categoryPublicId,
@@ -168,6 +171,7 @@ export class Todo {
                 const tasksWithSteps = tasks.map(task => ({
                     publicId: task.taskPublicId,
                     name: task.name,
+                    note: task.note,
                     addDate: task.addDate,
                     checkState: task.checkState,
                     categoryPublicId: task.categoryPublicId,
@@ -346,10 +350,12 @@ export class Todo {
                 conn = await pool.getConnection();
 
                 const [tasks] = await conn.execute(
-                    `SELECT T.publicId AS taskPublicId,
+                    `SELECT T.publicId AS publicId,
                             C.publicId AS categoryPublicId,
                             T.name     AS name,
-                            T.addDate  AS addDate
+                            T.addDate  AS addDate,
+                            T.importance AS importance,
+                            T.dateType AS dateType
                      FROM todo_tasks T
                               LEFT JOIN categories C ON T.categoryId = C.id
                      WHERE T.userId = ${userId}
@@ -360,14 +366,7 @@ export class Todo {
                      ORDER BY addDate, goalPos`
                 );
 
-                let goals_dict = {}
-                for (let i = 0; i < tasks.length; i++) {
-                    let day = Number(tasks[i].addDate.slice(-2))
-
-                    if (day in goals_dict) goals_dict[day].push(tasks[i])
-                    else goals_dict[day] = [tasks[i]]
-                }
-                res.json({success: true, tasks: goals_dict});
+                res.json({success: true, tasks: tasks});
 
             } catch (err) {
                 console.error(err);
@@ -438,33 +437,6 @@ export class Todo {
                     steps: stepsByTask[task.taskId] || []
                 }));
                 res.json({success: true, tasks: tasksWithSteps});
-
-            } catch (err) {
-                console.error(err);
-                res.status(500).json({success: false, error: err.message});
-            } finally {
-                if (conn) conn.release();
-            }
-        })
-
-        this.app.get('/api/get-inbox', requireAuth, async (req, res) => {
-
-            const userId = req.user.id;
-            let conn;
-
-            try {
-                conn = await pool.getConnection();
-
-                const [tasks] = await conn.execute(
-                    `SELECT I.publicId AS publicId,
-                            I.name     AS name,
-                            I.addDate  AS addDate
-                     FROM inbox I
-                     WHERE I.userId = ${userId}
-                       and I.checkState = 0
-                     ORDER BY I.id DESC`
-                );
-                res.json({success: true, tasks: tasks});
 
             } catch (err) {
                 console.error(err);
@@ -545,9 +517,81 @@ export class Todo {
             }
         })
 
+        this.app.get('/api/get-inbox', requireAuth, async (req, res) => {
+            const userId = req.user.id;
+            let conn;
+            try {
+                conn = await pool.getConnection();
+
+                const [tasks] = await conn.execute(
+                    `
+                        SELECT T.id         AS taskId,
+                               T.publicId   AS taskPublicId,
+                               T.name       AS name,
+                               T.checkState AS checkState,
+                               C.publicId   AS categoryPublicId,
+                               T.importance AS importance,
+                               P.publicId   AS projectPublicId,
+                               T.addDate    AS addDate,
+                               T.dateType   AS dateType
+                        FROM todo_tasks T
+                                 LEFT JOIN categories C ON T.categoryId = C.id
+                                 LEFT JOIN projects P ON T.projectId = P.id
+                        WHERE T.userId = ${userId}
+                          AND T.dateType = 4
+                          AND T.checkState = 0
+                        ORDER BY T.dateType ASC, T.id DESC
+                    `
+                );
+
+                if (tasks.length === 0) {
+                    return res.json({success: true, tasks: []});
+                }
+
+                // Fetch all steps for those tasks in one go
+                const taskIds = tasks.map(t => t.taskId);
+                const [steps] = await conn.execute(
+                    `SELECT id, goalId, name, stepCheck, publicId
+                     FROM steps
+                     WHERE goalId IN (${taskIds.join(',')})`,
+                );
+
+                // Group steps by task_id
+                const stepsByTask = steps.reduce((acc, step) => {
+                    acc[step.goalId] = acc[step.goalId] || [];
+                    acc[step.goalId].push({
+                        publicId: step.publicId,
+                        name: step.name,
+                        stepCheck: !!step.stepCheck
+                    });
+                    return acc;
+                }, {});
+                const tasksWithSteps = tasks.map(task => ({
+                    publicId: task.taskPublicId,
+                    name: task.name,
+                    addDate: task.addDate,
+                    checkState: task.checkState,
+                    categoryPublicId: task.categoryPublicId,
+                    importance: task.importance,
+                    projectPublicId: task.projectPublicId,
+                    goalPos: task.goalPos,
+                    dateType: task.dateType,
+                    steps: stepsByTask[task.taskId] || []
+                }));
+                res.json({success: true, tasks: tasksWithSteps});
+
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({success: false, error: err.message});
+            } finally {
+                if (conn) conn.release();
+            }
+        })
+
         this.app.get('/api/ask-edit-goal', requireAuth, async (req, res) => {
             const todo_id = req.query.id;
             const userId = req.user.id;
+
             let conn;
             try {
                 conn = await pool.getConnection();
@@ -650,9 +694,34 @@ export class Todo {
             } finally {
                 if (conn) conn.release();
             }
+
+
+        })
+
+        this.app.get('/api/get-strategy', requireAuth, async (req, res) => {
+            const userId = req.user.id;
+            let conn;
+            try {
+                conn = await pool.getConnection();
+
+                const [tasks] = await conn.execute(
+                    `
+                        SELECT * FROM strategy_tasks WHERE userId = ${userId}
+                    `
+                );
+
+                res.json({success: true, tasks: tasks});
+
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({success: false, error: err.message});
+            } finally {
+                if (conn) conn.release();
+            }
         })
 
         this.app.get('/api/get-icons', requireAuth, async (req, res) => {
+            const userId = req.user.id;
             let conn;
 
             try {
@@ -660,7 +729,7 @@ export class Todo {
 
                 const [tasks] = await conn.execute(
                     `SELECT *
-                     FROM icons`
+                     FROM icons WHERE userId = ? or userId IS NULL`, [userId]
                 );
                 res.json({success: true, tasks: tasks});
 
@@ -777,7 +846,6 @@ export class Todo {
         });
 
         this.app.patch('/api/change-checks-goal/', requireAuth, async (req, res) => {
-
             const id = req.query.id;
             const state = Number(req.query.state);          // will turn "0"/"1" → 0/1
             const userId = req.user.id;                     // from your auth middleware
@@ -840,7 +908,6 @@ export class Todo {
             const changes = JSON.parse(req.query.changes);
             const userId = req.user.id;
 
-
             let conn;
             try {
                 conn = await pool.getConnection();
@@ -850,7 +917,8 @@ export class Todo {
                         LEFT JOIN categories AS C
                     ON C.publicId = ?
                         LEFT JOIN projects AS P ON P.publicId = ?
-                        SET T.checkState = ?, T.name = ?, T.categoryId = C.id, T.importance = ?, T.note = ?, T.projectId = P.id, T.addDate = ?, T.dateType = ?
+                        SET T.checkState = ?, T.name = ?, T.categoryId = C.id, T.importance = ?, T.note = ?, 
+                            T.projectId = P.id, T.addDate = ?, T.dateType = ?
                     WHERE T.publicId = ?
                       AND T.userId = ?
                 `
@@ -1029,8 +1097,51 @@ export class Todo {
                        and S.userId = ?`,
                     [id, userId]
                 );
-                console.log(steps)
                 res.json({success: true, steps: steps});
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({success: false, error: err.message});
+            } finally {
+                if (conn) conn.release();
+            }
+        });
+
+        this.app.patch('/api/check-inbox-goal/', requireAuth, async (req, res) => {
+            const id = req.query.id;
+            const userId = req.user.id;
+
+            let conn;
+            try {
+                conn = await pool.getConnection();
+
+                const [result] = await conn.execute(
+                    'UPDATE inbox SET checkState=1 WHERE publicId = ? AND userId = ?',
+                    [id, userId]
+                );
+
+                res.json({success: true, updated: result.affectedRows});
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({success: false, error: err.message});
+            } finally {
+                if (conn) conn.release();
+            }
+        });
+
+        this.app.patch('/api/check-asap-goal/', requireAuth, async (req, res) => {
+            const id = req.query.id;
+            const userId = req.user.id;
+
+            let conn;
+            try {
+                conn = await pool.getConnection();
+
+                const [result] = await conn.execute(
+                    'UPDATE todo_tasks SET checkState=1 WHERE publicId = ? AND userId = ?',
+                    [id, userId]
+                );
+
+                res.json({success: true, updated: result.affectedRows});
             } catch (err) {
                 console.error(err);
                 res.status(500).json({success: false, error: err.message});
@@ -1081,10 +1192,11 @@ export class Todo {
                 conn = await pool.getConnection();
                 const sql = `
                     INSERT INTO todo_tasks
-                        (name, addDate, categoryId, importance, projectId, note, dateType, userId)
-                    VALUES (?, ?, (SELECT id FROM categories WHERE publicId = ?), ?, (SELECT id FROM projects WHERE publicId = ?), ?, ?, ?)
+                        (publicId, name, addDate, categoryId, importance, projectId, note, dateType, userId)
+                    VALUES (?,?, ?, (SELECT id FROM categories WHERE publicId = ?), ?, (SELECT id FROM projects WHERE publicId = ?), ?, ?, ?)
                 `;
                 const params = [
+                    changes['publicId'],
                     changes['name'],
                     changes['addDate'],
                     changes['categoryPublicId'],
@@ -1094,7 +1206,6 @@ export class Todo {
                     changes['dateType'],
                     userId
                 ];
-
                 const [result] = await conn.execute(
                     sql, params
                 );
@@ -1103,7 +1214,6 @@ export class Todo {
                     'SELECT publicId FROM todo_tasks WHERE id = ?',
                     [ result.insertId ]
                 );
-                console.log(publicId)
                 if (!changes['steps'].length) {
                     return res.json({success: true, result: [publicId, []]});
                 }
@@ -1147,6 +1257,159 @@ export class Todo {
                     'INSERT INTO projects (userId, name, categoryId, iconId) VALUES (?, ?, (SELECT id FROM categories WHERE publicId = ?), ?)',
                     [userId, name, category_id, icon]
                 );
+
+                const [project] = await conn.execute(
+                    'SELECT publicId FROM projects WHERE id = ?',
+                    [result.insertId]
+                );
+
+                res.json({success: true, id: project[0].publicId});
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({success: false, error: err.message});
+            } finally {
+                if (conn) conn.release();
+            }
+        });
+
+        this.app.post('/api/new-inbox-goal/', requireAuth, async (req, res) => {
+            const name = req.query.name;
+            const add_date = req.query.addDate;
+            const userId = req.user.id;
+
+            let conn;
+            try {
+                conn = await pool.getConnection();
+                const [result] = await conn.execute(
+                    'INSERT INTO inbox (userId, name, addDate) VALUES (?, ?, ?)',
+                    [userId, name, add_date]
+                );
+
+                const [goal] = await conn.execute(
+                    'SELECT publicId, name, addDate FROM inbox WHERE userId = ? and id = ?',
+                    [userId, result.insertId ]
+                );
+                res.json({success: true, goal: goal[0]});
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({success: false, error: err.message});
+            } finally {
+                if (conn) conn.release();
+            }
+        });
+
+        this.app.post('/api/new-goal-from-inbox/', requireAuth, async (req, res) => {
+            const userId = req.user.id;
+            const id = req.query.id;
+            const changes = JSON.parse(req.query.changes);
+
+            let conn;
+            try {
+                conn = await pool.getConnection();
+                const sql = `
+                    INSERT INTO todo_tasks
+                        (name, addDate, categoryId, projectId, note, dateType, userId)
+                    VALUES (?, ?, (SELECT id FROM categories WHERE publicId = ?), (SELECT id FROM projects WHERE publicId = ?), ?, ?, ?)
+                `;
+                const params = [
+                    changes['name'],
+                    changes['addDate'],
+                    changes['categoryPublicId'],
+                    changes['projectPublicId'],
+                    changes['note'],
+                    changes['dateType'],
+                    userId
+                ];
+                const [result] = await conn.execute(
+                    sql, params
+                );
+
+                await conn.execute(
+                    `DELETE FROM inbox WHERE userId = ? and publicId = ?`,
+                    [ userId, id ]
+                );
+
+                if (!changes['steps'].length) {
+                    return res.json({success: true, result: result});
+                }
+
+                let steps_values = ""
+                for (let j = 0; j < changes['steps'].length; j++) {
+                    steps_values += `("${changes['steps'][j].name}", ${result.insertId}, ${changes['steps'][j].stepCheck}, ${userId})`
+                    if (j < changes['steps'].length - 1) steps_values += ","
+                }
+                steps_values += ";"
+
+                await conn.execute(
+                    `INSERT INTO steps (name, goalId, stepCheck, userId)
+                     VALUES ${steps_values} `
+                );
+
+
+
+                res.json({success: true, result: result});
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({success: false, error: err.message});
+            } finally {
+                if (conn) conn.release();
+            }
+        });
+
+
+        this.app.post('/api/new-asap-goal/', requireAuth, async (req, res) => {
+            const userId = req.user.id;
+            const name = req.query.name;
+            const add_date = req.query.addDate;
+            const date_type = req.query.dateType;
+
+            let conn;
+            try {
+                conn = await pool.getConnection();
+                const [result] = await conn.execute(
+                    'INSERT INTO todo_tasks (name, addDate, dateType, userId) VALUES (?, ?, ?, ?)',
+                    [name, add_date, date_type, userId]
+                );
+
+                const [tasks] = await conn.execute(
+                    `SELECT T.publicId   AS publicId,
+                            C.publicId   AS categoryPublicId,
+                            P.publicId   AS projectPublicId,
+                            T.checkState AS checkState,
+                            T.goalPos    AS goalPos,
+                            T.importance AS importance,
+                            T.name       AS name,
+                            T.addDate    AS addDate,
+                            T.dateType   AS dateType
+                     FROM todo_tasks T
+                              LEFT JOIN categories C ON T.categoryId = C.id
+                              LEFT JOIN projects P ON T.projectId = P.id
+                     WHERE T.userId = ?
+                       and T.id = ?
+                     ORDER BY addDate, goalPos`, [userId ,result.insertId]
+                );
+
+                res.json({success: true, result: tasks[0]});
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({success: false, error: err.message});
+            } finally {
+                if (conn) conn.release();
+            }
+        });
+
+        this.app.post('/api/add-icon/', requireAuth, async (req, res) => {
+            const name = req.query.name;
+            const svgIcon = req.query.svg;
+
+            const userId = req.user.id;
+            let conn;
+            try {
+                conn = await pool.getConnection();
+                const [result] = await conn.execute(
+                    'INSERT INTO icons (userId, svg) VALUES (?, ?)',
+                    [userId, svgIcon]
+                );
                 res.json({success: true, id: result.insertId});
             } catch (err) {
                 console.error(err);
@@ -1156,5 +1419,6 @@ export class Todo {
             }
         });
     }
+
 
 }
