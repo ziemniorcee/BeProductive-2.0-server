@@ -4,7 +4,6 @@ import { Server }    from './server.js';
 
 async function bootstrap() {
     await initDb();
-    console.log('🔧 DB initialized');
 
     // 2) Create your server and configure routes
     const server = new Server();
