@@ -6,6 +6,7 @@ import {requireAuth} from "./auth-middleware.js";
 import {Todo} from "./todo/todo.js";
 import {Settings} from "./settings.js";
 import {initDb, pool} from "./db.js";
+import {Strategy} from "./strategy/strategy.js";
 
 export class Server {
     constructor() {
@@ -19,6 +20,7 @@ export class Server {
 
         // 2) Routes
         this.todo = new Todo(this.app);
+        this.strategy = new Strategy(this.app);
         this.settings = new Settings(this.app);
         this.getters()
 

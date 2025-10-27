@@ -698,27 +698,6 @@ export class Todo {
 
         })
 
-        this.app.get('/api/get-strategy', requireAuth, async (req, res) => {
-            const userId = req.user.id;
-            let conn;
-            try {
-                conn = await pool.getConnection();
-
-                const [tasks] = await conn.execute(
-                    `
-                        SELECT * FROM strategy_tasks WHERE userId = ${userId}
-                    `
-                );
-
-                res.json({success: true, tasks: tasks});
-
-            } catch (err) {
-                console.error(err);
-                res.status(500).json({success: false, error: err.message});
-            } finally {
-                if (conn) conn.release();
-            }
-        })
 
         this.app.get('/api/get-icons', requireAuth, async (req, res) => {
             const userId = req.user.id;
