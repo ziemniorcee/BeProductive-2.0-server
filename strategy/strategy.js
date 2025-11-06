@@ -23,10 +23,20 @@ export class Strategy {
 
                 const [tasks] = await conn.execute(
                     `
-                        SELECT * FROM strategy_tasks WHERE userId = ${userId}
+                        SELECT S.publicId,
+                               S.name,
+                               S.deadline,
+                               S.checkState,
+                               P.publicId AS projectPublicId,
+                               S.x,
+                               S.y,
+                               S.taskType
+                        FROM strategy_tasks S
+                                 LEFT JOIN projects P ON S.projectId = P.id
+                        WHERE S.userId = ${userId}
                     `
                 );
-
+                console.log(tasks)
                 res.json({success: true, tasks: tasks});
 
             } catch (err) {
@@ -55,8 +65,9 @@ export class Strategy {
             try {
                 conn = await pool.getConnection();
                 const [result] = await conn.execute(
-                    'INSERT INTO strategy_tasks (userId, name, projectId, taskType) VALUES (?, ?, (SELECT id FROM projects WHERE publicId = ?), ?)',
-                    [userId, changes.name, changes.projectPublicId, changes.pointType]
+                    'INSERT INTO strategy_tasks (userId, name, projectId, taskType, x, y) VALUES ' +
+                    '(?, ?, (SELECT id FROM projects WHERE publicId = ?), ?, ?, ?)',
+                    [userId, changes.name, changes.projectPublicId, changes.pointType, changes.x, changes.y]
                 );
 
                 res.json({success: true, goal: "XDD"});
