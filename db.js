@@ -5,7 +5,6 @@ import mysql from 'mysql2/promise';
 export let pool;
 
 export async function initDb() {
-    console.log(process.env.CLOUD_SQL_CONNECTION_NAME)
     const connector = new Connector();
     const clientOpts = await connector.getOptions({
         instanceConnectionName: process.env.CLOUD_SQL_CONNECTION_NAME.trim(),

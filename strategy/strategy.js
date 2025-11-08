@@ -36,7 +36,6 @@ export class Strategy {
                         WHERE S.userId = ${userId}
                     `
                 );
-                console.log(tasks)
                 res.json({success: true, tasks: tasks});
 
             } catch (err) {
@@ -53,21 +52,42 @@ export class Strategy {
     }
 
     updaters() {
+        this.app.patch('/api/change-point-position/', requireAuth, async (req, res) => {
+            const id = req.query.id;
+            const newPosition = JSON.parse(req.query.newPosition);
+            const userId = req.user.id;
+            let conn;
+            try {
+                conn = await pool.getConnection();
 
+                // 2 ▸ parameterised query (keeps SQL-injection out)
+                const [result] = await conn.execute(
+                    'UPDATE strategy_tasks SET x = ?, y = ? WHERE publicId = ? AND userId = ?',
+                    [newPosition["x"], newPosition["y"], id, userId]
+                );
+
+                // 3 ▸ report how many rows were touched
+                res.json({success: true, updated: result.affectedRows});
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({success: false, error: err.message});
+            } finally {
+                if (conn) conn.release();
+            }
+        });
     }
 
     posters() {
-        this.app.post('/api/patch-new-point/', requireAuth, async (req, res) => {
+        this.app.post('/api/save-new-point/', requireAuth, async (req, res) => {
             const changes = JSON.parse(req.query.changes);
             const userId = req.user.id;
-            console.log(changes.name, changes.projectPublicId, changes.pointType)
             let conn;
             try {
                 conn = await pool.getConnection();
                 const [result] = await conn.execute(
-                    'INSERT INTO strategy_tasks (userId, name, projectId, taskType, x, y) VALUES ' +
-                    '(?, ?, (SELECT id FROM projects WHERE publicId = ?), ?, ?, ?)',
-                    [userId, changes.name, changes.projectPublicId, changes.pointType, changes.x, changes.y]
+                    'INSERT INTO strategy_tasks (publicId,userId, name, projectId, taskType, x, y) VALUES ' +
+                    '(?,?, ?, (SELECT id FROM projects WHERE publicId = ?), ?, ?, ?)',
+                    [changes.publicId,userId, changes.name, changes.projectPublicId, changes.taskType, changes.x, changes.y]
                 );
 
                 res.json({success: true, goal: "XDD"});
