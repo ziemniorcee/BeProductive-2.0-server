@@ -30,7 +30,15 @@ export class Strategy {
                                P.publicId AS projectPublicId,
                                S.x,
                                S.y,
-                               S.taskType
+                               S.taskType,
+                               COALESCE(
+                                       (SELECT JSON_ARRAYAGG(ST_child.publicId)
+                                        FROM strategy_connections SC
+                                                 JOIN strategy_tasks ST_child ON SC.taskToId = ST_child.id
+                                        WHERE SC.taskFromId = S.id
+                                       ),
+                                       JSON_ARRAY()
+                               ) AS children
                         FROM strategy_tasks S
                                  LEFT JOIN projects P ON S.projectId = P.id
                         WHERE S.userId = ${userId}
@@ -98,5 +106,31 @@ export class Strategy {
                 if (conn) conn.release();
             }
         });
+
+        this.app.post('/api/create-link/', requireAuth, async (req, res) => {
+            const startNodeId = req.query.startNodeId;
+            const endNodeId = req.query.endNodeId;
+
+            const userId = req.user.id;
+            let conn;
+            try {
+                conn = await pool.getConnection();
+                const [result] = await conn.execute(
+                    'INSERT INTO strategy_connections (userId, taskFromId, taskToId) VALUES ' +
+                    '(?, (SELECT id FROM strategy_tasks WHERE publicId = ?), (SELECT id FROM strategy_tasks WHERE publicId = ?))',
+                    [userId, startNodeId, endNodeId ]
+                );
+
+                res.json({success: true, goal: "XDD"});
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({success: false, error: err.message});
+            } finally {
+                if (conn) conn.release();
+            }
+        });
     }
+
+
+
 }
