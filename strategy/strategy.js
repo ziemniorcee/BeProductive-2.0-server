@@ -56,7 +56,45 @@ export class Strategy {
     }
 
     deleters() {
+        this.app.delete('/api/remove-node/', requireAuth, async (req, res) => {
+            const id = req.query.nodeId;
+            const userId = req.user.id;
+            let conn;
+            try {
+                conn = await pool.getConnection();
+                const [result] = await conn.execute(
+                    'DELETE FROM strategy_tasks WHERE publicId = ? AND userId = ?',
+                    [id, userId]
+                );
+                res.json({success: true, deleted: result.affectedRows});
+            }
+            catch (err) {
+                console.error(err);
+                res.status(500).json({success: false, error: err.message});
+            } finally {
+                if (conn) conn.release();
+            }
+        })
 
+        this.app.delete('/api/remove-edge/', requireAuth, async (req, res) => {
+            const startNodeId = req.query.parentPublicId;
+            const endNodeId = req.query.childPublicId;
+            const userId = req.user.id;
+            let conn;
+            try {
+                conn = await pool.getConnection();
+                const [result] = await conn.execute(
+                    'DELETE FROM strategy_connections WHERE taskFromId = (SELECT id FROM strategy_tasks WHERE publicId = ?) AND taskToId = (SELECT id FROM strategy_tasks WHERE publicId = ?) AND userId = ?',
+                    [startNodeId, endNodeId, userId]
+                );
+                res.json({success: true, deleted: result.affectedRows});
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({success: false, error: err.message});
+            } finally {
+                if (conn) conn.release();
+            }
+        })
     }
 
     updaters() {
