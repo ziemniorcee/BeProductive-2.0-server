@@ -5,19 +5,19 @@ import mysql from 'mysql2/promise';
 export let pool;
 
 export async function initDb() {
-    const connector = new Connector();
-    const clientOpts = await connector.getOptions({
-        instanceConnectionName: process.env.CLOUD_SQL_CONNECTION_NAME.trim(),
-        ipType: 'PUBLIC', // albo logika na env PRIVATE_IP
-    });
-
     pool = mysql.createPool({
-        ...clientOpts,
+        host: process.env.DB_HOST,
+        port: process.env.DB_PORT,
         user:     process.env.DB_USER,
         password: process.env.DB_PASS,
         database: process.env.DB_NAME,
+        ssl: {
+            minVersion: 'TLSv1.2',
+            rejectUnauthorized: true
+        },
         waitForConnections: true,
         connectionLimit:    10,
+        queueLimit: 0
     });
 
     console.log('🔧 DB pool initialized');
