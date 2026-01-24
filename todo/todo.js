@@ -1133,17 +1133,29 @@ export class Todo {
     posters() {
         this.app.post('/api/add-category/', requireAuth, async (req, res) => {
             const name = req.query.name;
-            const r = req.query.r;
-            const g = req.query.g;
-            const b = req.query.b;
+            const id = req.query.id;
+
+            let colorObj;
+            try {
+                console.log(req.query.color)
+                colorObj = JSON.parse(req.query.color);
+            } catch (e) {
+                // Handle case where parsing fails (e.g. invalid JSON)
+                return res.status(400).send("Invalid color format");
+            }
+
+            // 3. Now you can access the keys
+            const r = colorObj.r;
+            const g = colorObj.g;
+            const b = colorObj.b;
 
             const userId = req.user.id;
             let conn;
             try {
                 conn = await pool.getConnection();
                 const [result] = await conn.execute(
-                    'INSERT INTO categories (userId, name, r, g, b) VALUES (?, ?, ?, ?, ?)',
-                    [userId, name, r, g, b]
+                    'INSERT INTO categories (publicId, userId, name, r, g, b) VALUES (?, ?, ?, ?, ?, ?)',
+                    [id, userId, name, r, g, b]
                 );
                 res.json({success: true, id: result.insertId});
             } catch (err) {
